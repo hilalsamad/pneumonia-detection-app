@@ -79,7 +79,7 @@ def gradcam_overlay(tensor_CHW, img_resized_HWC, model, det, score_th=0.3, image
     try:
         model.eval()
 
-        # ✅ Fix for "invalid data type 'str'"
+        # Ensure valid inputs
         if isinstance(img_resized_HWC, Image.Image):
             img_resized_HWC = np.array(img_resized_HWC)
         if not isinstance(img_resized_HWC, np.ndarray):
@@ -110,6 +110,10 @@ def gradcam_overlay(tensor_CHW, img_resized_HWC, model, det, score_th=0.3, image
             target_layers=[target_layer],
             reshape_transform=fasterrcnn_reshape_transform
         )
+
+        # Ensure tensor is float32
+        if tensor_CHW.dtype != torch.float32:
+            tensor_CHW = tensor_CHW.float()
 
         grayscale_cam = cam(input_tensor=tensor_CHW.unsqueeze(0), targets=targets)
         if grayscale_cam is None or len(grayscale_cam) == 0:
