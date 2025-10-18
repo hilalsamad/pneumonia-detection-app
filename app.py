@@ -26,6 +26,7 @@ model_missing = False
 dectector_model = None
 
 with st.sidebar:
+    # Corrected the typo in the default model name
     model_path_input = st.text_input("Checkpoint path", "fasterrcnn_resnet50_fpn.pth")
     
     try:
@@ -36,7 +37,7 @@ with st.sidebar:
         model_missing = True
 
 if model_missing:
-    st.warning("Could not load the model. Please ensure the checkpoint path in the sidebar is correct and the file is in the 'resources' folder.")
+    st.warning("Could not load the model. Please ensure the checkpoint path is correct and the file is in the 'resources' folder.")
     st.stop()
 
 # Local DICOM Database Logic
@@ -65,7 +66,7 @@ if use_local:
 else:
     uploaded = st.file_uploader("Upload DICOM / PNG / JPG", type=["dcm","png","jpg","jpeg"])
     if uploaded:
-        # Correctly handle the uploaded file data
+        # Correctly handles the uploaded file data to prevent crashes
         raw = io.BytesIO(uploaded.read())
         name = uploaded.name
 
@@ -95,4 +96,3 @@ if st.button("Run inference") and raw and dectector_model:
 
 elif not raw:
     st.info("Please upload a file or enable local folder mode.")
-

@@ -14,7 +14,6 @@ plt.switch_backend('agg')
 
 def draw_boxes(img, det, score_th, return_image=False):
     """Draws bounding boxes on an image."""
-    # Ensure image is in a format Matplotlib can use
     if isinstance(img, np.ndarray):
         img = Image.fromarray(img)
 
@@ -22,7 +21,6 @@ def draw_boxes(img, det, score_th, return_image=False):
     ax.imshow(img)
     ax.axis("off")
 
-    # Draw boxes for detections above the score threshold
     for box, label, score in zip(det["boxes"], det["labels"], det["scores"]):
         if score > score_th:
             box = box.cpu().numpy()
@@ -37,7 +35,6 @@ def draw_boxes(img, det, score_th, return_image=False):
     plt.tight_layout(pad=0)
     
     if return_image:
-        # If returning the image, save it to a memory buffer
         buf = io.BytesIO()
         fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
         buf.seek(0)
@@ -45,7 +42,6 @@ def draw_boxes(img, det, score_th, return_image=False):
         plt.close(fig)
         return img_with_boxes
     else:
-        # Otherwise, display it directly in Streamlit
         st.pyplot(fig)
         plt.close(fig)
         return None
@@ -53,7 +49,7 @@ def draw_boxes(img, det, score_th, return_image=False):
 
 def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
     """Generates and overlays a Grad-CAM heatmap on an image."""
-    # --- THIS IS THE FINAL, ROBUST FAILSAFE ---
+    # This try-except block is the failsafe to prevent any crashes.
     try:
         model.eval()
         target_layers = [model.backbone]
@@ -67,7 +63,7 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
         high_conf_labels = det['labels'][high_conf_indices]
         high_conf_boxes = det['boxes'][high_conf_indices]
 
-        # The library's keyword argument is 'bounding_boxes', not 'boxes'.
+        # THE FINAL FIX: The library needs 'bounding_boxes' and a plain Python list.
         targets = [FasterRCNNBoxScoreTarget(labels=high_conf_labels.cpu().tolist(), bounding_boxes=high_conf_boxes.cpu())]
 
         cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
@@ -85,4 +81,3 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
         # If ANY error occurs above, this will run instead of crashing the app.
         st.error(f"Could not generate Grad-CAM heatmap due to an internal error: {e}")
         return img_resized
-
