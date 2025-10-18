@@ -1,41 +1,84 @@
+import io
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
 from PIL import Image
+
 from pytorch_grad_cam import GradCAMPlusPlus
-from pytorch_grad_cam.utils.model_targets import FasterRCNNBoxScoreTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
+from pytorch_grad_cam.utils.model_targets import FasterRCNNBoxScoreTarget
+from pytorch_grad_cam.utils.reshape_transforms import fasterrcnn_reshape_transform
+
 import config
-import io
 
-# Use a non-interactive backend for Matplotlib
-plt.switch_backend('agg')
+# Use non-interactive backend for Streamlit
+plt.switch_backend("agg")
 
-def draw_boxes(img, det, score_th, return_image=False):
+
+# ----------------------------- helpers -----------------------------
+def _as_pil(img):
     if isinstance(img, np.ndarray):
-        img = Image.fromarray(img)
+        return Image.fromarray(img)
+    return img
+
+def _select_target_layer(model):
+    """
+    Works for torchvision's fasterrcnn_resnet50_fpn and similar.
+    We point Grad-CAM to the last ResNet block.
+    """
+    bb = getattr(model, "backbone", None)
+    if bb is None:
+        return None
+    # torchvision FRCNN backbones usually have .body.layer4
+    if hasattr(bb, "body") and hasattr(bb.body, "layer4"):
+        layer4 = bb.body.layer4
+        # last Bottleneck module (has conv3)
+        if hasattr(layer4, "__getitem__"):
+            return layer4[-1].conv3 if hasattr(layer4[-1], "conv3") else layer4[-1]
+        return layer4
+    # Fallback
+    return bb
+
+
+# ----------------------------- visualizers -----------------------------
+def draw_boxes(img, det, score_th=0.3, return_image=False):
+    """
+    Draw detection boxes on image.
+    img: np.ndarray or PIL.Image
+    det: dict with 'boxes', 'labels', 'scores' (torch.Tensors)
+    """
+    pil = _as_pil(img)
 
     fig, ax = plt.subplots(1)
-    ax.imshow(img)
+    ax.imshow(pil)
     ax.axis("off")
 
-    for box, label, score in zip(det["boxes"], det["labels"], det["scores"]):
-        if score > score_th:
-            box = box.cpu().numpy()
-            label_name = config.LABEL_MAP.get(label.item(), "N/A")
-            x, y, x2, y2 = box
-            w, h = x2 - x, y2 - y
-            rect = plt.Rectangle((x, y), w, h, linewidth=2, edgecolor='lime', facecolor='none')
+    boxes = det.get("boxes", torch.empty(0))
+    labels = det.get("labels", torch.empty(0))
+    scores = det.get("scores", torch.empty(0))
+
+    # Guard: ensure tensors
+    if not all(isinstance(x, torch.Tensor) for x in [boxes, labels, scores]):
+        st.error("Detection outputs are not tensors; check model output.")
+        plt.close(fig)
+        return None if not return_image else pil
+
+    for box, label, score in zip(boxes, labels, scores):
+        if float(score) >= float(score_th):
+            x1, y1, x2, y2 = box.detach().cpu().numpy().tolist()
+            rect = plt.Rectangle((x1, y1), x2 - x1, y2 - y1,
+                                 linewidth=2, edgecolor="lime", facecolor="none")
             ax.add_patch(rect)
-            ax.text(x, y-10, f"{label_name}: {score:.2f}", color='lime', fontsize=12,
-                     bbox=dict(facecolor='black', alpha=0.5))
-    
+            name = config.LABEL_MAP.get(int(label.item()), "N/A")
+            ax.text(x1, y1 - 8, f"{name}: {float(score):.2f}",
+                    color="lime", fontsize=12,
+                    bbox=dict(facecolor="black", alpha=0.5))
+
     plt.tight_layout(pad=0)
-    
     if return_image:
         buf = io.BytesIO()
-        fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
+        fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0)
         buf.seek(0)
         plt.close(fig)
         return Image.open(buf)
@@ -45,37 +88,54 @@ def draw_boxes(img, det, score_th, return_image=False):
         return None
 
 
-def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
+def gradcam_overlay(tensor_CHW, img_resized_HWC, model, det, score_th=0.3, image_weight=0.6):
+    """
+    Create Grad-CAM++ overlay for detections above score_th.
+
+    tensor_CHW: torch.FloatTensor on correct device, shape [C,H,W], normalized for the model
+    img_resized_HWC: np.uint8 or np.float32 image in HxWxC (0-255)
+    model: Faster R-CNN model
+    det: detection dict from model([tensor])[0]
+    """
     try:
         model.eval()
-        target_layers = [model.backbone]
-        
-        high_conf_indices = det['scores'] > 0.3
-        
-        if not torch.any(high_conf_indices):
-            st.warning("No high-confidence detections found to generate a heatmap.")
-            return img_resized
 
-        high_conf_labels = det['labels'][high_conf_indices]
-        high_conf_boxes = det['boxes'][high_conf_indices]
+        boxes = det.get("boxes")
+        labels = det.get("labels")
+        scores = det.get("scores")
+        if not all(isinstance(x, torch.Tensor) for x in [boxes, labels, scores]):
+            st.error("Detection outputs are not tensors; check model output.")
+            return img_resized_HWC
 
-        # --- THIS IS THE FINAL, DEFINITIVE FIX ---
-        # The library's keyword argument is 'bounding_boxes', not 'boxes'.
-        targets = [FasterRCNNBoxScoreTarget(labels=high_conf_labels.cpu().tolist(), bounding_boxes=high_conf_boxes.cpu())]
-        # --- END OF FIX ---
+        keep = scores > float(score_th)
+        if not torch.any(keep):
+            st.warning("No high-confidence detections for Grad-CAM.")
+            return img_resized_HWC
 
-        cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
-        grayscale_cam = cam(input_tensor=tensor.unsqueeze(0), targets=targets)
-        
-        if grayscale_cam is None:
-            st.warning("Grad-CAM generation returned an empty result.")
-            return img_resized
-            
-        grayscale_cam = grayscale_cam[0, :]
-        
-        return show_cam_on_image((img_resized / 255.0).astype(np.float32), grayscale_cam, use_rgb=True, image_weight=image_weight)
-    
+        tgt_boxes = boxes[keep].detach().cpu()
+        tgt_labels = labels[keep].detach().cpu().tolist()
+
+        targets = [FasterRCNNBoxScoreTarget(labels=tgt_labels, bounding_boxes=tgt_boxes)]
+
+        # Choose a valid conv layer, and use FPN reshape so Grad-CAM can map FPN features to image space
+        target_layer = _select_target_layer(model)
+        cam = GradCAMPlusPlus(
+            model=model,
+            target_layers=[target_layer],
+            reshape_transform=fasterrcnn_reshape_transform
+        )
+
+        # CAM expects NCHW; we already have CHW -> unsqueeze
+        grayscale_cam = cam(input_tensor=tensor_CHW.unsqueeze(0), targets=targets)
+        if grayscale_cam is None or len(grayscale_cam) == 0:
+            st.warning("Grad-CAM returned empty result.")
+            return img_resized_HWC
+
+        cam_map = grayscale_cam[0, :]
+        base = (img_resized_HWC / 255.0).astype(np.float32)
+        cam_img = show_cam_on_image(base, cam_map, use_rgb=True, image_weight=image_weight)
+        return cam_img
+
     except Exception as e:
-        st.error(f"Could not generate Grad-CAM heatmap due to an internal error: {e}")
-        return img_resized
-
+        st.error(f"Grad-CAM error: {e}")
+        return img_resized_HWC
