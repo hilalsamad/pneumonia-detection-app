@@ -23,31 +23,31 @@ with st.sidebar:
     ckpt = config.CHECKPOINT_PATH / model_path
 
     try:
-        dectector_model = model.build_model(model_path, device)
-        json_config = load_config(config.CHECKPOINT_PATH/ f"{model_name}.json")
-        ROC_CURVE_PATH    = json_config["roc_curve_path"]
-        metrics_list      = json_config["metrics"]
-        if st.button("Show model metrics"):
-            # compute trainable params
-            num_params = sum(p.numel() for p in dectector_model.parameters() if p.requires_grad)
+    dectector_model = model.build_model(model_path, device)
+    # json_config = load_config(config.CHECKPOINT_PATH/ f"{model_name}.json")
+    # ROC_CURVE_PATH    = json_config["roc_curve_path"]
+    # metrics_list      = json_config["metrics"]
+    # if st.button("Show model metrics"):
+    #     # compute trainable params
+    #     num_params = sum(p.numel() for p in dectector_model.parameters() if p.requires_grad)
 
-            # Display ROC curve
-            st.sidebar.image(ROC_CURVE_PATH, caption="ROC Curve", use_container_width=True)
+    #     # Display ROC curve
+    #     st.sidebar.image(ROC_CURVE_PATH, caption="ROC Curve", use_container_width=True)
 
-            try:
-                # build DataFrame, filling in the trainable‐params cell
-                metrics_list[-1]["Value"] = f"{num_params:,}"
-                df = pd.DataFrame(metrics_list)
+    #     try:
+    #         # build DataFrame, filling in the trainable‐params cell
+    #         metrics_list[-1]["Value"] = f"{num_params:,}"
+    #         df = pd.DataFrame(metrics_list)
 
-                st.sidebar.data_editor(
-                    df,
-                    hide_index=True,
-                    num_rows="fixed",
-                )
-            except:
-                pass
+    #         st.sidebar.data_editor(
+    #             df,
+    #             hide_index=True,
+    #             num_rows="fixed",
+    #         )
+    #     except:
+    #         pass
     except:
-        model_missing = True
+    model_missing = True
 
 if model_missing:
     st.warning("Please add a checkpoint PATH from your model in the sidebar")
