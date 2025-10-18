@@ -53,14 +53,13 @@ def draw_boxes(img, det, score_th, return_image=False):
 
 def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
     """Generates and overlays a Grad-CAM heatmap on an image."""
+    # --- THIS IS THE FINAL, ROBUST FAILSAFE ---
     try:
         model.eval()
         target_layers = [model.backbone]
         
-        # 1. Filter for high-confidence detections to generate a meaningful heatmap.
         high_conf_indices = det['scores'] > 0.3
         
-        # 2. If there are no confident detections, we can't make a heatmap.
         if not torch.any(high_conf_indices):
             st.warning("No high-confidence detections found to generate a heatmap.")
             return img_resized
@@ -68,10 +67,9 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
         high_conf_labels = det['labels'][high_conf_indices]
         high_conf_boxes = det['boxes'][high_conf_indices]
 
-        # 3. THE FINAL FIX: The library needs 'bounding_boxes' and a plain Python list.
+        # The library's keyword argument is 'bounding_boxes', not 'boxes'.
         targets = [FasterRCNNBoxScoreTarget(labels=high_conf_labels.cpu().tolist(), bounding_boxes=high_conf_boxes.cpu())]
 
-        # 4. Generate the CAM.
         cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
         grayscale_cam = cam(input_tensor=tensor.unsqueeze(0), targets=targets)
         
@@ -81,12 +79,10 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
             
         grayscale_cam = grayscale_cam[0, :]
         
-        # 5. Return the final overlay.
         return show_cam_on_image((img_resized / 255.0).astype(np.float32), grayscale_cam, use_rgb=True, image_weight=image_weight)
     
     except Exception as e:
-        # 6. FAILSAFE: If any unexpected error occurs, display it in the app
-        # and return the original image so the app never crashes.
+        # If ANY error occurs above, this will run instead of crashing the app.
         st.error(f"Could not generate Grad-CAM heatmap due to an internal error: {e}")
         return img_resized
 
