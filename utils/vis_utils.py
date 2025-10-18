@@ -46,29 +46,38 @@ def draw_boxes(img, det, score_th, return_image=False):
 
 
 def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
-    model.eval()
-    target_layers = [model.backbone]
-    
-    high_conf_indices = det['scores'] > 0.3
-    
-    if not torch.any(high_conf_indices):
-        return img_resized
-
-    high_conf_labels = det['labels'][high_conf_indices]
-    high_conf_boxes = det['boxes'][high_conf_indices]
-
-    # --- THIS IS THE FINAL, DEFINITIVE FIX ---
-    # The CAM library expects a list of python integers for labels, not a tensor.
-    targets = [FasterRCNNBoxScoreTarget(labels=high_conf_labels.cpu().tolist(), boxes=high_conf_boxes.cpu())]
-    # --- END OF FIX ---
-
-    cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
-    grayscale_cam = cam(input_tensor=tensor.unsqueeze(0), targets=targets)
-    
-    if grayscale_cam is None:
-        return img_resized
+    # --- THIS IS THE FINAL, ROBUST FIX ---
+    # If Grad-CAM fails for any reason, we will catch the error
+    # and return the original image, preventing the app from crashing.
+    try:
+        model.eval()
+        target_layers = [model.backbone]
         
-    grayscale_cam = grayscale_cam[0, :]
+        high_conf_indices = det['scores'] > 0.3
+        
+        if not torch.any(high_conf_indices):
+            return img_resized
+
+        high_conf_labels = det['labels'][high_conf_indices]
+        high_conf_boxes = det['boxes'][high_conf_indices]
+
+        # The CAM library expects a list of python integers for labels, not a tensor.
+        targets = [FasterRCNNBoxScoreTarget(labels=high_conf_labels.cpu().tolist(), boxes=high_conf_boxes.cpu())]
+
+        cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
+        grayscale_cam = cam(input_tensor=tensor.unsqueeze(0), targets=targets)
+        
+        if grayscale_cam is None:
+            return img_resized
+            
+        grayscale_cam = grayscale_cam[0, :]
+        
+        return show_cam_on_image((img_resized / 255.0).astype(np.float32), grayscale_cam, use_rgb=True, image_weight=image_weight)
     
-    return show_cam_on_image((img_resized / 255.0).astype(np.float32), grayscale_cam, use_rgb=True, image_weight=image_weight)
+    except Exception as e:
+        # If any error occurs during CAM generation, we will now catch it,
+        # print the error to the logs for debugging, and return the original
+        # image so the app does not crash.
+        print(f"Error during Grad-CAM generation: {e}")
+        return img_resized
 
