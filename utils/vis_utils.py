@@ -52,39 +52,37 @@ def draw_boxes(img, det, score_th, return_image=False):
 def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
     """
     Generate a Grad-CAM++ overlay for Faster R-CNN models.
-    Forces Grad-CAM to use the final tensor feature map, not the OrderedDict.
+    Ensures Grad-CAM sees a plain tensor, not an OrderedDict.
     """
     try:
         model.eval()
 
-        # 1️⃣ Wrapper that returns only a Tensor feature map
+        # 1️⃣ Wrap backbone to ensure tensor output
         class BackboneTensor(torch.nn.Module):
             def __init__(self, backbone):
                 super().__init__()
                 self.backbone = backbone
 
             def forward(self, x):
-                with torch.no_grad():
-                    feats = self.backbone(x)
-                    if isinstance(feats, (dict, torch.nn.modules.container.OrderedDict)):
-                        feats = list(feats.values())[-1]  # take last feature map
-                    # make sure it's a tensor
-                    if not torch.is_tensor(feats):
-                        feats = torch.as_tensor(feats, dtype=torch.float32)
-                    return feats
+                feats = self.backbone(x)
+                if isinstance(feats, (dict, torch.nn.modules.container.OrderedDict)):
+                    feats = list(feats.values())[-1]
+                if not torch.is_tensor(feats):
+                    feats = torch.as_tensor(feats, dtype=torch.float32)
+                return feats
 
         wrapped_backbone = BackboneTensor(model.backbone)
 
-        # 2️⃣ Custom forward function that replaces model’s forward
-        def tensor_forward(x):
+        # 2️⃣ Custom forward accepting any args Grad-CAM passes
+        def tensor_forward(x, *args, **kwargs):
             return wrapped_backbone(x)
 
-        # 3️⃣ Instantiate Grad-CAM with this tensor-returning forward function
+        # 3️⃣ Instantiate Grad-CAM with safe wrapper
         cam = GradCAMPlusPlus(model=wrapped_backbone,
                               target_layers=[wrapped_backbone.backbone])
-        cam.forward = tensor_forward  # override internal forward
+        cam.forward = tensor_forward  # override safely
 
-        # 4️⃣ Run Grad-CAM
+        # 4️⃣ Compute Grad-CAM
         grayscale_cam = cam(input_tensor=tensor.unsqueeze(0))
         if grayscale_cam is None or len(grayscale_cam) == 0:
             st.warning("Grad-CAM generation returned an empty result.")
@@ -92,7 +90,7 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
 
         grayscale_cam = grayscale_cam[0, :]
 
-        # 5️⃣ Overlay the heatmap
+        # 5️⃣ Overlay heatmap on image
         heatmap_img = show_cam_on_image(
             (img_resized / 255.0).astype(np.float32),
             grayscale_cam,
@@ -103,6 +101,5 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
         return heatmap_img
 
     except Exception as e:
-        # 🔴 The error is caught and reported here — app will not crash
         st.error(f"Could not generate Grad-CAM heatmap due to an internal error: {e}")
         return img_resized
