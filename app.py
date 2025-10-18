@@ -26,7 +26,6 @@ model_missing = False
 dectector_model = None
 
 with st.sidebar:
-    # Corrected the typo in the default model name
     model_path_input = st.text_input("Checkpoint path", "fasterrcnn_resnet50_fpn.pth")
     
     try:
@@ -96,3 +95,4 @@ if st.button("Run inference") and raw and dectector_model:
 
 elif not raw:
     st.info("Please upload a file or enable local folder mode.")
+

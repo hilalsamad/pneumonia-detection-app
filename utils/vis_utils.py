@@ -15,6 +15,7 @@ plt.switch_backend('agg')
 def draw_boxes(img, det, score_th, return_image=False):
     """Draws bounding boxes on an image."""
     if isinstance(img, np.ndarray):
+        # Convert numpy array to PIL Image
         img = Image.fromarray(img)
 
     fig, ax = plt.subplots(1, figsize=(10, 10))
@@ -54,8 +55,10 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
         model.eval()
         target_layers = [model.backbone]
         
+        # Filter for high-confidence detections
         high_conf_indices = det['scores'] > 0.3
         
+        # If no detections are confident enough, return the original image
         if not torch.any(high_conf_indices):
             st.warning("No high-confidence detections found to generate a heatmap.")
             return img_resized
@@ -63,21 +66,26 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
         high_conf_labels = det['labels'][high_conf_indices]
         high_conf_boxes = det['boxes'][high_conf_indices]
 
-        # THE FINAL FIX: The library needs 'bounding_boxes' and a plain Python list.
+        # THE FINAL FIX: The library needs 'bounding_boxes' and a plain Python list for labels.
         targets = [FasterRCNNBoxScoreTarget(labels=high_conf_labels.cpu().tolist(), bounding_boxes=high_conf_boxes.cpu())]
 
         cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
         grayscale_cam = cam(input_tensor=tensor.unsqueeze(0), targets=targets)
         
+        # Check if CAM generation was successful
         if grayscale_cam is None:
             st.warning("Grad-CAM generation returned an empty result.")
             return img_resized
             
         grayscale_cam = grayscale_cam[0, :]
         
-        return show_cam_on_image((img_resized / 255.0).astype(np.float32), grayscale_cam, use_rgb=True, image_weight=image_weight)
+        # Ensure the image is in the correct format for overlay
+        overlay_image = (img_resized / 255.0).astype(np.float32)
+        
+        return show_cam_on_image(overlay_image, grayscale_cam, use_rgb=True, image_weight=image_weight)
     
     except Exception as e:
         # If ANY error occurs above, this will run instead of crashing the app.
         st.error(f"Could not generate Grad-CAM heatmap due to an internal error: {e}")
         return img_resized
+
