@@ -12,44 +12,31 @@ from pytorch_grad_cam.utils.reshape_transforms import fasterrcnn_reshape_transfo
 
 import config
 
-# Use non-interactive backend for Streamlit
 plt.switch_backend("agg")
 
 
-# ----------------------------- helpers -----------------------------
 def _as_pil(img):
     if isinstance(img, np.ndarray):
         return Image.fromarray(img)
     return img
 
+
 def _select_target_layer(model):
-    """
-    Works for torchvision's fasterrcnn_resnet50_fpn and similar.
-    We point Grad-CAM to the last ResNet block.
-    """
+    """Pick the last convolutional layer of the Faster R-CNN backbone."""
     bb = getattr(model, "backbone", None)
     if bb is None:
         return None
-    # torchvision FRCNN backbones usually have .body.layer4
     if hasattr(bb, "body") and hasattr(bb.body, "layer4"):
         layer4 = bb.body.layer4
-        # last Bottleneck module (has conv3)
         if hasattr(layer4, "__getitem__"):
             return layer4[-1].conv3 if hasattr(layer4[-1], "conv3") else layer4[-1]
         return layer4
-    # Fallback
     return bb
 
 
-# ----------------------------- visualizers -----------------------------
 def draw_boxes(img, det, score_th=0.3, return_image=False):
-    """
-    Draw detection boxes on image.
-    img: np.ndarray or PIL.Image
-    det: dict with 'boxes', 'labels', 'scores' (torch.Tensors)
-    """
+    """Draw detection boxes on image."""
     pil = _as_pil(img)
-
     fig, ax = plt.subplots(1)
     ax.imshow(pil)
     ax.axis("off")
@@ -58,7 +45,6 @@ def draw_boxes(img, det, score_th=0.3, return_image=False):
     labels = det.get("labels", torch.empty(0))
     scores = det.get("scores", torch.empty(0))
 
-    # Guard: ensure tensors
     if not all(isinstance(x, torch.Tensor) for x in [boxes, labels, scores]):
         st.error("Detection outputs are not tensors; check model output.")
         plt.close(fig)
@@ -89,16 +75,17 @@ def draw_boxes(img, det, score_th=0.3, return_image=False):
 
 
 def gradcam_overlay(tensor_CHW, img_resized_HWC, model, det, score_th=0.3, image_weight=0.6):
-    """
-    Create Grad-CAM++ overlay for detections above score_th.
-
-    tensor_CHW: torch.FloatTensor on correct device, shape [C,H,W], normalized for the model
-    img_resized_HWC: np.uint8 or np.float32 image in HxWxC (0-255)
-    model: Faster R-CNN model
-    det: detection dict from model([tensor])[0]
-    """
+    """Generate Grad-CAM++ heatmap overlay."""
     try:
         model.eval()
+
+        # ✅ Fix for "invalid data type 'str'"
+        if isinstance(img_resized_HWC, Image.Image):
+            img_resized_HWC = np.array(img_resized_HWC)
+        if not isinstance(img_resized_HWC, np.ndarray):
+            raise TypeError(f"Expected numpy array for image, got {type(img_resized_HWC)}")
+        if not isinstance(tensor_CHW, torch.Tensor):
+            raise TypeError(f"Expected torch.Tensor for tensor, got {type(tensor_CHW)}")
 
         boxes = det.get("boxes")
         labels = det.get("labels")
@@ -116,16 +103,14 @@ def gradcam_overlay(tensor_CHW, img_resized_HWC, model, det, score_th=0.3, image
         tgt_labels = labels[keep].detach().cpu().tolist()
 
         targets = [FasterRCNNBoxScoreTarget(labels=tgt_labels, bounding_boxes=tgt_boxes)]
-
-        # Choose a valid conv layer, and use FPN reshape so Grad-CAM can map FPN features to image space
         target_layer = _select_target_layer(model)
+
         cam = GradCAMPlusPlus(
             model=model,
             target_layers=[target_layer],
             reshape_transform=fasterrcnn_reshape_transform
         )
 
-        # CAM expects NCHW; we already have CHW -> unsqueeze
         grayscale_cam = cam(input_tensor=tensor_CHW.unsqueeze(0), targets=targets)
         if grayscale_cam is None or len(grayscale_cam) == 0:
             st.warning("Grad-CAM returned empty result.")

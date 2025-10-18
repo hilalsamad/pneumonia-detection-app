@@ -13,7 +13,7 @@ from utils.dicom_utils import list_dicom_files, filter_by_patient_id, read_dicom
 st.set_page_config(page_title="Pneumonia Detection", layout="centered")
 st.title("Pneumonia Detection")
 st.markdown("(Faster R-CNN + Grad-CAM++)")
-st.caption("Upload or select a chest X-ray to detect pneumonia, view bounding boxes, and explore Grad-CAM++ heatmaps for model interpretability.")
+st.caption("Upload or select a chest X-ray to detect pneumonia, view bounding boxes, and explore Grad-CAM++ heatmaps.")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 st.write(f"Running inference on: **{device}**")
@@ -79,7 +79,7 @@ if st.button("Run inference") and raw and detector_model:
     with torch.no_grad():
         det = detector_model([tensor])[0]
 
-    # Display side-by-side detection + Grad-CAM++
+    # Side-by-side display
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Detections")
@@ -90,9 +90,11 @@ if st.button("Run inference") and raw and detector_model:
         cam_img = vis_utils.gradcam_overlay(tensor, rgb_resized, detector_model, det, score_th=score_th)
         st.image(cam_img, use_container_width=True)
 
-    # Combined overlay with bounding boxes + heatmap
+    # Combined overlay
     st.subheader("Detections + Heatmaps")
-    cam_img_overlay = vis_utils.gradcam_overlay(tensor, rgb_resized, detector_model, det, score_th=score_th, image_weight=0.8)
+    cam_img_overlay = vis_utils.gradcam_overlay(
+        tensor, rgb_resized, detector_model, det, score_th=score_th, image_weight=0.8
+    )
     final_overlay = vis_utils.draw_boxes(cam_img_overlay, det, score_th, return_image=True)
     st.image(final_overlay, use_container_width=True)
 
