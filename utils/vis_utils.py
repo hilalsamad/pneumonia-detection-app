@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-import streamlit as st  # <--- THIS WAS THE MISSING LINE
+import streamlit as st
 from PIL import Image
 from pytorch_grad_cam import GradCAMPlusPlus
 from pytorch_grad_cam.utils.model_targets import FasterRCNNBoxScoreTarget
@@ -48,8 +48,24 @@ def draw_boxes(img, det, score_th, return_image=False):
 def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
     model.eval()
     target_layers = [model.backbone]
-    targets = [FasterRCNNBoxScoreTarget(labels=det["labels"][det['scores'] > 0.3], boxes=det["boxes"][det['scores'] > 0.3])]
     
+    # --- THIS IS THE FIX ---
+    # Find detections with scores above a threshold
+    high_conf_indices = det['scores'] > 0.3
+    
+    # If there are no high-confidence detections, we can't create a CAM.
+    # Just return the original image.
+    if not torch.any(high_conf_indices):
+        return img_resized
+
+    # Filter the labels and boxes using the high-confidence indices
+    high_conf_labels = det['labels'][high_conf_indices]
+    high_conf_boxes = det['boxes'][high_conf_indices]
+
+    # Create the target for Grad-CAM using only the filtered detections
+    targets = [FasterRCNNBoxScoreTarget(labels=high_conf_labels, boxes=high_conf_boxes)]
+    # --- END OF FIX ---
+
     cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
     grayscale_cam = cam(input_tensor=tensor.unsqueeze(0), targets=targets)
     
