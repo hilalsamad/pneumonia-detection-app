@@ -26,7 +26,7 @@ model_missing = False
 dectector_model = None
 
 with st.sidebar:
-    model_path_input = st.text_input("Checkpoint path", "fasterrcnn_resnet5_fpn.pth")
+    model_path_input = st.text_input("Checkpoint path", "fasterrcnn_resnet50_fpn.pth")
     
     try:
         # This is the corrected, simplified model loading section
