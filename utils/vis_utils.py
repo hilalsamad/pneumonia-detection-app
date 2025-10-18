@@ -46,9 +46,10 @@ def draw_boxes(img, det, score_th, return_image=False):
         return None
 
 
-from grad_cam import GradCAMPlusPlus
-from grad_cam.utils.model_targets import FasterRCNNBoxScoreTarget
-from grad_cam.utils.image import show_cam_on_image
+from pytorch_grad_cam import GradCAMPlusPlus
+from pytorch_grad_cam.utils.model_targets import FasterRCNNBoxScoreTarget
+from pytorch_grad_cam.utils.image import show_cam_on_image
+
 
 def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
     try:
