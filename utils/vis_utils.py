@@ -82,6 +82,12 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
         high_conf_labels = det['labels'][high_conf_indices]
         high_conf_boxes = det['boxes'][high_conf_indices]
 
+        # --- unwrap OrderedDicts if any (bug fix) ---
+        if isinstance(high_conf_boxes, (dict, torch.nn.modules.container.OrderedDict)):
+            high_conf_boxes = list(high_conf_boxes.values())[0]
+        if isinstance(high_conf_labels, (dict, torch.nn.modules.container.OrderedDict)):
+            high_conf_labels = list(high_conf_labels.values())[0]
+
         # Ensure tensors are tensors (and not lists or OrderedDicts)
         labels_t = (high_conf_labels
                     if torch.is_tensor(high_conf_labels)
@@ -89,6 +95,7 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
         boxes_t = (high_conf_boxes
                    if torch.is_tensor(high_conf_boxes)
                    else torch.tensor(high_conf_boxes))
+
 
         # Safely detach and move to CPU
         targets = [FasterRCNNBoxScoreTarget(
