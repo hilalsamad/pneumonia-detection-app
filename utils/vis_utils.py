@@ -3,8 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
 from PIL import Image
-from pytorch_grad_cam import GradCAMPlusPlus
-from pytorch_grad_cam.utils.image import show_cam_on_image
 import config
 import io
 
@@ -12,7 +10,7 @@ plt.switch_backend("agg")
 
 
 def draw_boxes(img, det, score_th, return_image=False):
-    """Draw bounding boxes and labels for detections above threshold."""
+    """Draw detection boxes and labels."""
     if isinstance(img, np.ndarray):
         img = Image.fromarray(img)
 
@@ -27,7 +25,6 @@ def draw_boxes(img, det, score_th, return_image=False):
                 x1, y1, x2, y2 = box
                 w, h = x2 - x1, y2 - y1
                 name = config.LABEL_MAP.get(label.item(), str(label.item()))
-
                 rect = plt.Rectangle((x1, y1), w, h,
                                      linewidth=2, edgecolor='lime', facecolor='none')
                 ax.add_patch(rect)
@@ -51,54 +48,58 @@ def draw_boxes(img, det, score_th, return_image=False):
 
 def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
     """
-    Generate a Grad-CAM++ overlay for Faster R-CNN models.
-    Ensures Grad-CAM sees a plain tensor, not an OrderedDict.
+    Safe Grad-CAM visualization for Faster R-CNN.
+    Uses gradients from ROI head wrt backbone feature map.
     """
     try:
         model.eval()
 
-        # 1️⃣ Wrap backbone to ensure tensor output
-        class BackboneTensor(torch.nn.Module):
-            def __init__(self, backbone):
-                super().__init__()
-                self.backbone = backbone
+        # forward pass through backbone
+        features = model.backbone(tensor.unsqueeze(0))
+        if isinstance(features, dict):
+            features = list(features.values())[-1]
 
-            def forward(self, x):
-                feats = self.backbone(x)
-                if isinstance(feats, (dict, torch.nn.modules.container.OrderedDict)):
-                    feats = list(feats.values())[-1]
-                if not torch.is_tensor(feats):
-                    feats = torch.as_tensor(feats, dtype=torch.float32)
-                return feats
-
-        wrapped_backbone = BackboneTensor(model.backbone)
-
-        # 2️⃣ Custom forward accepting any args Grad-CAM passes
-        def tensor_forward(x, *args, **kwargs):
-            return wrapped_backbone(x)
-
-        # 3️⃣ Instantiate Grad-CAM with safe wrapper
-        cam = GradCAMPlusPlus(model=wrapped_backbone,
-                              target_layers=[wrapped_backbone.backbone])
-        cam.forward = tensor_forward  # override safely
-
-        # 4️⃣ Compute Grad-CAM
-        grayscale_cam = cam(input_tensor=tensor.unsqueeze(0))
-        if grayscale_cam is None or len(grayscale_cam) == 0:
-            st.warning("Grad-CAM generation returned an empty result.")
+        # forward pass through rest of model to get detections
+        detections = model(tensor.unsqueeze(0))[0]
+        if len(detections["boxes"]) == 0:
+            st.warning("No detections found.")
             return img_resized
 
-        grayscale_cam = grayscale_cam[0, :]
+        # pick the highest-confidence detection
+        top_idx = torch.argmax(detections["scores"])
+        box = detections["boxes"][top_idx]
+        label = detections["labels"][top_idx]
 
-        # 5️⃣ Overlay heatmap on image
-        heatmap_img = show_cam_on_image(
-            (img_resized / 255.0).astype(np.float32),
-            grayscale_cam,
-            use_rgb=True,
-            image_weight=image_weight
-        )
+        # compute a pseudo "score" (mean of box features)
+        score = detections["scores"][top_idx]
+        score_tensor = score.unsqueeze(0)
 
-        return heatmap_img
+        # backward through the backbone feature map
+        features.requires_grad_(True)
+        score_tensor.backward(retain_graph=True)
+
+        # Grad-CAM computation
+        grads = features.grad
+        if grads is None:
+            st.warning("Gradients not found — CAM skipped.")
+            return img_resized
+
+        weights = torch.mean(grads, dim=(2, 3), keepdim=True)
+        cam = torch.sum(weights * features, dim=1).squeeze()
+        cam = torch.relu(cam)
+        cam = cam - cam.min()
+        cam = cam / (cam.max() + 1e-8)
+        cam = cam.detach().cpu().numpy()
+
+        cam = np.uint8(255 * cam)
+        cam = np.uint8(Image.fromarray(cam).resize(img_resized.shape[:2][::-1]))
+        cam = cam.astype(np.float32) / 255.0
+
+        heatmap = plt.cm.jet(cam)[..., :3]
+        overlay = (1 - image_weight) * (img_resized / 255.0) + image_weight * heatmap
+        overlay = np.clip(overlay, 0, 1)
+        overlay = (overlay * 255).astype(np.uint8)
+        return overlay
 
     except Exception as e:
         st.error(f"Could not generate Grad-CAM heatmap due to an internal error: {e}")
