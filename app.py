@@ -1,8 +1,13 @@
-import streamlit as st, torch, numpy as np, pandas as pd
+import streamlit as st
+import torch
+import numpy as np
 from PIL import Image
-import model, utils.io_utils as io_utils, utils.vis_utils as vis_utils, config
+import model
+import utils.io_utils as io_utils
+import utils.vis_utils as vis_utils
+import config
 from utils.dicom_utils import list_dicom_files, filter_by_patient_id, read_dicom_raw, read_dicom_metadata
-from utils.utils import load_config
+
 # App UI
 st.set_page_config(page_title="Pneumonia Detection", layout="centered")
 st.title("Pneumonia Detection")
@@ -15,42 +20,24 @@ score_th = st.slider("Score threshold", 0.0, 1.0, 0.5, 0.05)
 # Our variables
 raw = None
 name = None
-model_missing=None
+model_missing = False
+dectector_model = None
 
 with st.sidebar:
     model_path = st.text_input("Checkpoint path", "fasterrcnn_resnet50_fpn.pth")
-    model_name = model_path.removesuffix(".pth")
-    ckpt = config.CHECKPOINT_PATH / model_path
-
+    
     try:
-    	dectector_model = model.build_model(model_path, device)
-   	 # json_config = load_config(config.CHECKPOINT_PATH/ f"{model_name}.json")
-  	  # ROC_CURVE_PATH    = json_config["roc_curve_path"]
-    	# metrics_list      = json_config["metrics"]
-    	# if st.button("Show model metrics"):
-    	#     # compute trainable params
-    	#     num_params = sum(p.numel() for p in dectector_model.parameters() if p.requires_grad)
+        # This is the only thing we need to do in the sidebar.
+        # All the metric-loading code that was causing errors is now gone.
+        dectector_model = model.build_model(model_path, device)
+    except Exception as e:
+        # If model loading fails for any reason, set the flag.
+        model_missing = True
+        st.error(f"Failed to load model. Error: {e}")
 
-	    #     # Display ROC curve
-	    #     st.sidebar.image(ROC_CURVE_PATH, caption="ROC Curve", use_container_width=True)
-
-	    #     try:
-	    #         # build DataFrame, filling in the trainable‐params cell
-	    #         metrics_list[-1]["Value"] = f"{num_params:,}"
-	    #         df = pd.DataFrame(metrics_list)
-
-	    #         st.sidebar.data_editor(
-    	#             df,
-    	#             hide_index=True,
-    	#             num_rows="fixed",
-    	#         )
-    	#     except:
-    	#         pass
-    	except:
-    		model_missing = True
 
 if model_missing:
-    st.warning("Please add a checkpoint PATH from your model in the sidebar")
+    st.warning("Could not load the model. Please ensure the checkpoint path is correct and the file is in the 'resources' folder.")
     st.stop()
 
 # Local DICOM Database Logic
@@ -64,7 +51,7 @@ if use_local:
 
     query = st.text_input("🔍 Search Patient ID", "")
     dicom_paths = (
-        filter_by_patient_id(all_paths, query) 
+        filter_by_patient_id(all_paths, query)
         if query else all_paths
     )
     if not dicom_paths:
@@ -72,27 +59,25 @@ if use_local:
         st.stop()
 
     selected_path = st.selectbox("Choose a DICOM file", dicom_paths)
-    raw, name = read_dicom_raw(selected_path)
+    if selected_path:
+        raw, name = read_dicom_raw(selected_path)
 
-    md = read_dicom_metadata(selected_path)
-    st.markdown("#### Selected File Metadata")
-    for k, v in md.items():
-        st.markdown(f"- **{k}:** {v or '—'}")
+        md = read_dicom_metadata(selected_path)
+        st.markdown("#### Selected File Metadata")
+        for k, v in md.items():
+            st.markdown(f"- **{k}:** {v or '—'}")
 else:
     uploaded = st.file_uploader("Upload DICOM / PNG / JPG",
                             type=["dcm","png","jpg","jpeg"])
-    if not uploaded:
-        st.info("Please upload a file or enable local folder mode.")
-        st.stop()
-
-    raw = uploaded.read()
-    name = uploaded.name
+    if uploaded:
+        raw = uploaded.read()
+        name = uploaded.name
 
 # Inference Logic
-if st.button("Run inference") and raw:
+if st.button("Run inference") and raw and dectector_model:
     rgb = io_utils.raw_bytes_to_rgb(raw, name)
     rgb_resized = np.array(Image.fromarray(rgb).resize(config.IMAGE_SIZE))
-    tensor = io_utils.preprocess(rgb).to(device)
+    tensor = io_utils.preprocess(rgb_resized).to(device)
 
     with torch.no_grad():
         det = dectector_model([tensor])[0]
@@ -107,5 +92,10 @@ if st.button("Run inference") and raw:
         st.image(cam_img, use_container_width=True)
     
     st.subheader("Detections + Heatmaps")
-    cam_img = vis_utils.gradcam_overlay(tensor, rgb_resized, dectector_model, det, image_weight=0.8)
-    vis_utils.draw_boxes(cam_img, det, score_th)
+    cam_img_overlay = vis_utils.gradcam_overlay(tensor, rgb_resized, dectector_model, det, image_weight=0.8)
+    # Create a new image with boxes drawn on the heatmap overlay
+    final_image_with_boxes = vis_utils.draw_boxes(cam_img_overlay, det, score_th, return_image=True)
+    st.image(final_image_with_boxes, use_container_width=True)
+
+elif not raw:
+    st.info("Please upload a file or enable local folder mode.")
