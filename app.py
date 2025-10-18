@@ -2,6 +2,7 @@ import streamlit as st
 import torch
 import numpy as np
 from PIL import Image
+import io
 import model
 import utils.io_utils as io_utils
 import utils.vis_utils as vis_utils
@@ -70,7 +71,7 @@ else:
     uploaded = st.file_uploader("Upload DICOM / PNG / JPG",
                             type=["dcm","png","jpg","jpeg"])
     if uploaded:
-        raw = uploaded.read()
+        raw = io.BytesIO(uploaded.read())
         name = uploaded.name
 
 # Inference Logic
