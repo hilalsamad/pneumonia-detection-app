@@ -49,7 +49,6 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
     model.eval()
     target_layers = [model.backbone]
     
-    # --- THIS IS THE FIX ---
     # Find detections with scores above a threshold
     high_conf_indices = det['scores'] > 0.3
     
@@ -62,8 +61,10 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
     high_conf_labels = det['labels'][high_conf_indices]
     high_conf_boxes = det['boxes'][high_conf_indices]
 
-    # Create the target for Grad-CAM using only the filtered detections
-    targets = [FasterRCNNBoxScoreTarget(labels=high_conf_labels, boxes=high_conf_boxes)]
+    # --- THIS IS THE FINAL FIX ---
+    # Create the target for Grad-CAM.
+    # The CAM library may not correctly handle tensors on a GPU, so we move them to the CPU.
+    targets = [FasterRCNNBoxScoreTarget(labels=high_conf_labels.cpu(), boxes=high_conf_boxes.cpu())]
     # --- END OF FIX ---
 
     cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
