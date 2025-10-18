@@ -8,12 +8,11 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 import config
 import io
 
-# Use non-interactive backend for Streamlit
 plt.switch_backend("agg")
 
 
 def draw_boxes(img, det, score_th, return_image=False):
-    """Draw bounding boxes and class labels on the image."""
+    """Draw bounding boxes and labels for detections above threshold."""
     if isinstance(img, np.ndarray):
         img = Image.fromarray(img)
 
@@ -27,25 +26,19 @@ def draw_boxes(img, det, score_th, return_image=False):
                 box = box.detach().cpu().numpy()
                 x1, y1, x2, y2 = box
                 w, h = x2 - x1, y2 - y1
-                label_name = config.LABEL_MAP.get(label.item(), "N/A")
+                name = config.LABEL_MAP.get(label.item(), str(label.item()))
 
-                rect = plt.Rectangle(
-                    (x1, y1), w, h, linewidth=2, edgecolor="lime", facecolor="none"
-                )
+                rect = plt.Rectangle((x1, y1), w, h,
+                                     linewidth=2, edgecolor='lime', facecolor='none')
                 ax.add_patch(rect)
-                ax.text(
-                    x1,
-                    y1 - 10,
-                    f"{label_name}: {score:.2f}",
-                    color="lime",
-                    fontsize=12,
-                    bbox=dict(facecolor="black", alpha=0.5),
-                )
+                ax.text(x1, y1 - 10, f"{name}: {score:.2f}",
+                        color='lime', fontsize=12,
+                        bbox=dict(facecolor='black', alpha=0.5))
 
     plt.tight_layout(pad=0)
     if return_image:
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0)
+        fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
         buf.seek(0)
         img_with_boxes = Image.open(buf)
         plt.close(fig)
@@ -58,33 +51,31 @@ def draw_boxes(img, det, score_th, return_image=False):
 
 def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
     """
-    Generate a Grad-CAM++ heatmap overlay for Faster R-CNN.
-    This version wraps the backbone so Grad-CAM sees feature maps instead of detection dicts.
+    Generate a Grad-CAM++ overlay for Faster R-CNN models.
+    Returns an RGB NumPy image with the heatmap overlay.
     """
     try:
         model.eval()
 
-        # ------------------------------------------------------------------
-        # 1. Define a simple wrapper so Grad-CAM receives tensor features
-        # ------------------------------------------------------------------
-        class BackboneWrapper(torch.nn.Module):
+        # ---- Wrap the backbone so Grad-CAM always sees a Tensor ----
+        class TensorBackboneWrapper(torch.nn.Module):
             def __init__(self, backbone):
                 super().__init__()
                 self.backbone = backbone
 
             def forward(self, x):
-                # FasterRCNN backbone returns OrderedDict of feature maps
-                features = self.backbone(x)
-                if isinstance(features, dict):
-                    # take the deepest feature map (usually "0" or last key)
-                    features = list(features.values())[-1]
-                return features
+                with torch.no_grad():
+                    feats = self.backbone(x)
+                    # Take the *last* feature map and ensure it's a Tensor
+                    if isinstance(feats, dict) or isinstance(feats, torch.nn.modules.container.OrderedDict):
+                        feats = list(feats.values())[-1]
+                    if not torch.is_tensor(feats):
+                        feats = torch.stack([torch.tensor(f, dtype=torch.float32) for f in feats])
+                    return feats
 
-        wrapped_model = BackboneWrapper(model.backbone)
+        wrapped_model = TensorBackboneWrapper(model.backbone)
 
-        # ------------------------------------------------------------------
-        # 2. Run Grad-CAM++
-        # ------------------------------------------------------------------
+        # ---- Run Grad-CAM on the wrapped model ----
         cam = GradCAMPlusPlus(model=wrapped_model, target_layers=[wrapped_model.backbone])
         grayscale_cam = cam(input_tensor=tensor.unsqueeze(0))
 
@@ -94,14 +85,12 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
 
         grayscale_cam = grayscale_cam[0, :]
 
-        # ------------------------------------------------------------------
-        # 3. Overlay CAM on the RGB image
-        # ------------------------------------------------------------------
+        # ---- Overlay the heatmap on the input image ----
         heatmap_img = show_cam_on_image(
             (img_resized / 255.0).astype(np.float32),
             grayscale_cam,
             use_rgb=True,
-            image_weight=image_weight,
+            image_weight=image_weight
         )
 
         return heatmap_img
