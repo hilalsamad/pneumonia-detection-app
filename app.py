@@ -29,7 +29,6 @@ with st.sidebar:
     model_path_input = st.text_input("Checkpoint path", "fasterrcnn_resnet50_fpn.pth")
     
     try:
-        # This is the corrected, simplified model loading section
         dectector_model = model.build_model(model_path_input, device)
     except Exception as e:
         st.error(f"Failed to load model: {e}")
@@ -65,7 +64,6 @@ if use_local:
 else:
     uploaded = st.file_uploader("Upload DICOM / PNG / JPG", type=["dcm","png","jpg","jpeg"])
     if uploaded:
-        # Correctly handles the uploaded file data to prevent crashes
         raw = io.BytesIO(uploaded.read())
         name = uploaded.name
 
@@ -95,4 +93,3 @@ if st.button("Run inference") and raw and dectector_model:
 
 elif not raw:
     st.info("Please upload a file or enable local folder mode.")
-
