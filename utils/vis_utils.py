@@ -58,6 +58,12 @@ def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
     """
     try:
         model.eval()
+        # --- DEBUG: print detection structure ---
+        import streamlit as st
+        st.write("DEBUG det type:", type(det))
+        if isinstance(det, dict):
+            for k, v in det.items():
+                st.write(f"{k} -> {type(v)}")
 
         # Handle possible list or OrderedDict outputs
         if not isinstance(det, dict):
