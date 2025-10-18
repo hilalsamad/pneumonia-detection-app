@@ -3,16 +3,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
 from PIL import Image
-from pytorch_grad_cam import GradCAMPlusPlus
-from pytorch_grad_cam.utils.model_targets import FasterRCNNBoxScoreTarget
-from pytorch_grad_cam.utils.image import show_cam_on_image
 import config
 import io
 
-# Use a non-interactive backend for Matplotlib
+# Use a non-interactive backend for Matplotlib to prevent errors
 plt.switch_backend('agg')
 
 def draw_boxes(img, det, score_th, return_image=False):
+    """Draws bounding boxes on an image."""
     if isinstance(img, np.ndarray):
         img = Image.fromarray(img)
 
@@ -47,35 +45,12 @@ def draw_boxes(img, det, score_th, return_image=False):
 
 
 def gradcam_overlay(tensor, img_resized, model, det, image_weight=0.5):
-    # This failsafe block prevents the app from ever crashing during heatmap generation.
-    try:
-        model.eval()
-        target_layers = [model.backbone]
-        
-        high_conf_indices = det['scores'] > 0.3
-        
-        if not torch.any(high_conf_indices):
-            st.warning("No high-confidence detections found to generate a heatmap.")
-            return img_resized
-
-        high_conf_labels = det['labels'][high_conf_indices]
-        high_conf_boxes = det['boxes'][high_conf_indices]
-
-        # THE FINAL FIX: The library needs 'bounding_boxes' and a plain Python list.
-        targets = [FasterRCNNBoxScoreTarget(labels=high_conf_labels.cpu().tolist(), bounding_boxes=high_conf_boxes.cpu())]
-
-        cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
-        grayscale_cam = cam(input_tensor=tensor.unsqueeze(0), targets=targets)
-        
-        if grayscale_cam is None:
-            st.warning("Grad-CAM generation returned an empty result.")
-            return img_resized
-            
-        grayscale_cam = grayscale_cam[0, :]
-        
-        return show_cam_on_image((img_resized / 255.0).astype(np.float32), grayscale_cam, use_rgb=True, image_weight=image_weight)
-    
-    except Exception as e:
-        # If any error occurs, display it in the app and return the original image.
-        st.error(f"Could not generate Grad-CAM heatmap due to an internal error: {e}")
-        return img_resized
+    """
+    STABLE PLACEHOLDER: The Grad-CAM feature is disabled due to a deep library
+    incompatibility. This function returns the original image to ensure the app
+    is stable and functional for the main detection task.
+    """
+    # This function now simply returns the image to prevent any crashes.
+    st.info("Grad-CAM heatmap feature is currently disabled to ensure app stability.")
+    return img_resized
+```
